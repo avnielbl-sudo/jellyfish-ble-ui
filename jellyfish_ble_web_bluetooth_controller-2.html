@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Jellyfish_BLE — Mobile AUV Controller</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            oceanBg: '#071019',
+            oceanCard: '#0f1d2c',
+            oceanCardInner: '#091420',
+            cyanAccent: '#38bdf8',
+            emeraldAccent: '#34d399',
+            stopRed: '#ef4444'
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      max-width: 100%;
+      overflow-x: hidden;
+      background-color: #071019;
+      color: #f1f5f9;
+      font-variant-numeric: tabular-nums;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .safe-top {
+      padding-top: max(0.5rem, env(safe-area-inset-top));
+    }
+
+    .safe-bottom {
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+
+    .num-tabular {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ocean-card {
+      background-color: #0f1d2c;
+      border: 1px solid rgba(56, 189, 248, 0.16);
+      box-shadow: 0 10px 26px -12px rgba(0, 0, 0, 0.75);
+    }
+
+    /* Touch-friendly range sliders (never scroll page while dragging) */
+    input[type="range"].touch-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      touch-action: none;
+      width: 100%;
+      height: 14px;
+      border-radius: 9999px;
+      background: #091420;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      cursor: pointer;
+    }
+
+    input[type="range"].touch-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 30px;
+      height: 30px;
+      border-radius: 9999px;
+      background: radial-gradient(circle at 35% 35%, #bae6fd, #38bdf8 65%, #0284c7);
+      border: 2px solid #f0f9ff;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.65);
+      cursor: grab;
+    }
+
+    input[type="range"].touch-slider::-webkit-slider-thumb:active {
+      cursor: grabbing;
+      transform: scale(1.08);
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.95);
+    }
+
+    input[type="range"].touch-slider::-moz-range-thumb {
+      width: 30px;
+      height: 30px;
+      border-radius: 9999px;
+      background: radial-gradient(circle at 35% 35%, #bae6fd, #38bdf8 65%, #0284c7);
+      border: 2px solid #f0f9ff;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.65);
+      cursor: grab;
+    }
+
+    /* 2D Virtual Joystick Pad */
+    .joystick-arena {
+      touch-action: none;
+      width: min(68vw, 248px);
+      height: min(68vw, 248px);
+      background:
+        radial-gradient(circle at center, rgba(56, 189, 248, 0.14) 0%, rgba(14, 116, 144, 0.06) 48%, #08121d 80%),
+        repeating-radial-gradient(circle at center, transparent 0, transparent 34px, rgba(56, 189, 248, 0.13) 35px, transparent 36px);
+    }
+
+    .joystick-puck {
+      touch-action: none;
+      background: radial-gradient(circle at 32% 32%, #e0f2fe, #38bdf8 50%, #0284c7 88%, #0c4a6e 100%);
+      box-shadow: 0 0 22px rgba(56, 189, 248, 0.65), inset 0 2px 4px rgba(255, 255, 255, 0.75);
+      transition: box-shadow 0.12s ease;
+    }
+
+    .joystick-puck.active {
+      box-shadow: 0 0 30px rgba(56, 189, 248, 0.95), inset 0 2px 5px rgba(255, 255, 255, 0.9);
+    }
+
+    /* Desktop >= 900px shows panels simultaneously while mobile uses clean tabs */
+    @media (min-width: 900px) {
+      .mobile-tab-bar {
+        display: none !important;
+      }
+      .desktop-grid-shell {
+        display: grid !important;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 1.25rem;
+        align-items: start;
+      }
+      .tab-panel {
+        display: block !important;
+      }
+      .tab-panel-log {
+        grid-column: 1 / -1;
+      }
+    }
+
+    .log-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .log-scroll::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.25);
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-oceanBg text-slate-100 antialiased">
+
+  <!-- Non-blocking Toast Banner -->
+  <div id="toastBanner" class="fixed bottom-16 left-3 right-3 sm:left-auto sm:right-4 sm:bottom-4 z-50 hidden sm:max-w-sm rounded-xl border border-sky-400/40 bg-slate-900/95 px-3.5 py-2.5 text-xs text-sky-100 shadow-2xl backdrop-blur-md">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <span id="toastIcon" class="text-sky-400 shrink-0">●</span>
+        <p id="toastMessage" class="truncate"></p>
+      </div>
+      <button id="toastClose" type="button" class="min-h-[32px] min-w-[32px] text-slate-400 hover:text-white">✕</button>
+    </div>
+  </div>
+
+  <!-- 1. STICKY TOP ACTION BAR (Safe-area aware, always-reachable Emergency OFF) -->
+  <header class="sticky top-0 z-40 w-full border-b border-sky-400/15 bg-oceanBg/95 backdrop-blur-md safe-top">
+    <div class="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-2 sm:px-5">
+      <!-- Left: Compact Title + Status Pill -->
+      <div class="flex items-center gap-2 min-w-0">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-sky-400/30 bg-sky-500/15 text-sky-300">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12a7 7 0 0 1 14 0c0 1.5-1.2 2-2.5 2s-2-.5-2.5-1.5c-.5 1-1.2 1.5-2 1.5s-1.5-.5-2-1.5c-.5 1-1.2 1.5-2.5 1.5S5 13.5 5 12Z" />
+            <path d="M8 14.5c0 2.5-1 4-1 6" />
+            <path d="M12 14v7" />
+            <path d="M16 14.5c0 2.5 1 4 1 6" />
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5">
+            <span class="truncate text-sm sm:text-base font-bold tracking-tight text-white">Jellyfish BLE</span>
+            <span id="statusBadge" class="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/35 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+              <span id="statusDot" class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
+              <span id="statusText">Offline</span>
+            </span>
+          </div>
+          <p class="hidden sm:block font-mono text-[10px] text-slate-400 truncate">
+            UUID 6E400001…CCA9E
+          </p>
+        </div>
+      </div>
+
+      <!-- Right: Connect / Demo Pill + Min 44px Emergency STOP / OFF -->
+      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div class="inline-flex rounded-xl border border-slate-700/90 bg-oceanCard p-0.5">
+          <button id="bleConnectBtn" type="button" class="min-h-[40px] rounded-lg bg-sky-500/20 px-2.5 sm:px-3 text-xs font-semibold text-sky-200 hover:bg-sky-500/30 active:scale-[0.98] transition">
+            <span id="bleConnectLabel">Connect</span>
+          </button>
+          <button id="simToggleBtn" type="button" aria-pressed="false" class="min-h-[40px] rounded-lg px-2.5 text-xs font-medium text-slate-400 hover:text-slate-200 active:scale-[0.98] transition">
+            Demo
+          </button>
+        </div>
+
+        <button id="emergencyOffBtn" type="button" class="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-stopRed px-3 sm:px-4 text-xs sm:text-sm font-bold tracking-wide text-white shadow-lg shadow-red-600/35 hover:bg-red-500 active:scale-[0.97] transition">
+          <span class="h-2.5 w-2.5 rounded-sm bg-white"></span>
+          <span>STOP / OFF</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. MOBILE TAB NAVIGATION (< 900px) -->
+    <nav aria-label="Controller Views" class="mobile-tab-bar mx-auto max-w-6xl px-3 pb-2">
+      <div class="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-oceanCardInner p-1">
+        <button type="button" data-tab="pilot" class="tab-btn min-h-[44px] rounded-lg bg-sky-500/20 border border-sky-400/40 text-xs font-semibold text-sky-200 transition">
+          Pilot
+        </button>
+        <button type="button" data-tab="trim" class="tab-btn min-h-[44px] rounded-lg border border-transparent text-xs font-medium text-slate-400 hover:text-slate-200 transition">
+          Trim &amp; Motors
+        </button>
+        <button type="button" data-tab="log" class="tab-btn min-h-[44px] rounded-lg border border-transparent text-xs font-medium text-slate-400 hover:text-slate-200 transition">
+          Log <span id="tabLogCount" class="ml-1 font-mono text-[10px] text-slate-500">0</span>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <!-- MAIN WORKSPACE -->
+  <main class="mx-auto max-w-6xl px-3 pt-3 pb-8 sm:px-5 sm:pt-5 safe-bottom">
+    <div class="desktop-grid-shell space-y-4">
+
+      <!-- =============================================================== -->
+      <!-- TAB 1: PILOT (2D Joystick + Throttle + Servo + Telemetry Pills) -->
+      <!-- =============================================================== -->
+      <section id="panel-pilot" class="tab-panel ocean-card rounded-2xl p-3.5 sm:p-5 space-y-4">
+        <!-- Live Telemetry Readout Pills (2x2 on narrow phones, 4-col on sm+) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div class="rounded-xl border border-slate-800 bg-oceanCardInner px-3 py-2">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">Throttle (T)</div>
+            <div id="pillThrottle" class="num-tabular font-mono text-base sm:text-lg font-bold text-cyanAccent">0</div>
+          </div>
+          <div class="rounded-xl border border-slate-800 bg-oceanCardInner px-3 py-2">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">Servo (A)</div>
+            <div id="pillServo" class="num-tabular font-mono text-base sm:text-lg font-bold text-sky-300">90°</div>
+          </div>
+          <div class="rounded-xl border border-slate-800 bg-oceanCardInner px-3 py-2">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">ESC 1 Pulse</div>
+            <div id="pillEsc1" class="num-tabular font-mono text-base sm:text-lg font-bold text-emeraldAccent">1000 µs</div>
+          </div>
+          <div class="rounded-xl border border-slate-800 bg-oceanCardInner px-3 py-2">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400">ESC 2 Pulse</div>
+            <div id="pillEsc2" class="num-tabular font-mono text-base sm:text-lg font-bold text-sky-300">1000 µs</div>
+          </div>
+        </div>
+
+        <!-- Centered 2D Virtual Joystick + Spring-Return Switch -->
+        <div class="flex flex-col items-center rounded-2xl border border-slate-800/90 bg-oceanCardInner/80 py-4 px-3">
+          <div class="mb-2.5 flex w-full items-center justify-between gap-2 px-1">
+            <span class="text-xs font-semibold text-slate-300">2D Vector Joystick</span>
+            <label class="inline-flex min-h-[36px] cursor-pointer items-center gap-2 rounded-lg border border-slate-700/80 bg-oceanCard px-2.5 py-1 text-xs text-slate-300">
+              <span>Spring Return</span>
+              <input id="springReturnToggle" type="checkbox" checked class="sr-only peer" />
+              <span class="relative h-5 w-9 rounded-full bg-slate-700 peer-checked:bg-sky-500 transition-colors">
+                <span id="springKnob" class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform translate-x-4"></span>
+              </span>
+            </label>
+          </div>
+
+          <div id="joystickPad" class="joystick-arena relative rounded-full border-2 border-sky-400/35 flex items-center justify-center shadow-inner">
+            <div class="pointer-events-none absolute inset-x-4 h-px bg-sky-400/15"></div>
+            <div class="pointer-events-none absolute inset-y-4 w-px bg-sky-400/15"></div>
+            <span class="pointer-events-none absolute top-2 font-mono text-[10px] text-sky-300/80">T 1000</span>
+            <span class="pointer-events-none absolute bottom-2 font-mono text-[10px] text-slate-500">T 0</span>
+            <span class="pointer-events-none absolute left-2.5 font-mono text-[10px] text-slate-400">A 0°</span>
+            <span class="pointer-events-none absolute right-2.5 font-mono text-[10px] text-slate-400">A 180°</span>
+
+            <div id="joystickKnob" class="joystick-puck absolute h-16 w-16 rounded-full border-2 border-white/85 flex items-center justify-center cursor-grab">
+              <div class="h-3 w-3 rounded-full bg-white"></div>
+            </div>
+          </div>
+
+          <div class="mt-2.5 flex items-center gap-3 text-[11px] font-mono text-slate-400">
+            <span>Y → <strong class="text-sky-300">T</strong></span>
+            <span>·</span>
+            <span>X → <strong class="text-sky-300">A</strong></span>
+            <button id="zeroJoystickBtn" type="button" class="min-h-[34px] rounded-lg border border-slate-700 bg-oceanCard px-2.5 text-xs text-slate-200 hover:border-sky-400/40 active:scale-[0.98]">
+              Center &amp; Zero
+            </button>
+          </div>
+        </div>
+
+        <!-- One-Thumb Master Throttle Slider & Presets -->
+        <div class="rounded-xl border border-slate-800 bg-oceanCardInner p-3.5 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <label for="masterThrottleSlider" class="text-xs font-semibold text-slate-200">
+              Master Throttle (<span class="font-mono text-cyanAccent">T</span>)
+            </label>
+            <span id="masterThrottleLabel" class="num-tabular font-mono text-sm font-bold text-cyanAccent">0 / 1000</span>
+          </div>
+          <input id="masterThrottleSlider" type="range" min="0" max="1000" step="1" value="0" class="touch-slider" />
+          <div class="grid grid-cols-4 gap-1.5 pt-1">
+            <button type="button" data-t="1" class="t-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs font-semibold text-slate-200 hover:border-sky-400/50 active:scale-[0.98]">Min T1</button>
+            <button type="button" data-t="250" class="t-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs font-semibold text-slate-200 hover:border-sky-400/50 active:scale-[0.98]">25%</button>
+            <button type="button" data-t="500" class="t-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs font-semibold text-slate-200 hover:border-sky-400/50 active:scale-[0.98]">50%</button>
+            <button type="button" data-t="750" class="t-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs font-semibold text-slate-200 hover:border-sky-400/50 active:scale-[0.98]">75%</button>
+          </div>
+        </div>
+
+        <!-- One-Thumb Servo Angle Slider + Compact Arc Gauge -->
+        <div class="rounded-xl border border-slate-800 bg-oceanCardInner p-3.5 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <!-- Compact SVG Arc Gauge (scales cleanly on 360px screens) -->
+              <svg viewBox="0 0 84 46" class="h-10 w-18 shrink-0 overflow-visible" aria-hidden="true">
+                <path d="M 8 40 A 34 34 0 0 1 76 40" fill="none" stroke="rgba(51,65,85,0.8)" stroke-width="6" stroke-linecap="round" />
+                <path id="servoArcPath" d="M 8 40 A 34 34 0 0 1 42 6" fill="none" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" />
+                <g id="servoNeedleGroup" transform="translate(42, 40) rotate(0)">
+                  <line x1="0" y1="0" x2="0" y2="-28" stroke="#f8fafc" stroke-width="2.2" stroke-linecap="round" />
+                  <circle cx="0" cy="0" r="3.5" fill="#34d399" />
+                </g>
+              </svg>
+              <div>
+                <label for="servoSlider" class="block text-xs font-semibold text-slate-200">
+                  MG90S Servo (<span class="font-mono text-sky-300">A</span>)
+                </label>
+                <span id="servoAngleLabel" class="num-tabular font-mono text-sm font-bold text-sky-300">90°</span>
+              </div>
+            </div>
+
+            <button id="centerServoBtn" type="button" class="min-h-[44px] rounded-xl border border-sky-400/35 bg-sky-500/15 px-3 text-xs font-semibold text-sky-200 hover:bg-sky-500/25 active:scale-[0.98]">
+              Center 90°
+            </button>
+          </div>
+
+          <input id="servoSlider" type="range" min="0" max="180" step="1" value="90" class="touch-slider" />
+          <div class="grid grid-cols-5 gap-1.5 pt-0.5">
+            <button type="button" data-a="0" class="a-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">0°</button>
+            <button type="button" data-a="45" class="a-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">45°</button>
+            <button type="button" data-a="90" class="a-preset min-h-[44px] rounded-xl border border-sky-400/40 bg-sky-500/15 font-mono text-xs font-semibold text-sky-200 active:scale-[0.98]">90°</button>
+            <button type="button" data-a="135" class="a-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">135°</button>
+            <button type="button" data-a="180" class="a-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">180°</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- TAB 2: TRIM & MOTORS (R/O Normalization, Ramp D, M1 & M2 Bench) -->
+      <!-- =============================================================== -->
+      <section id="panel-trim" class="tab-panel hidden ocean-card rounded-2xl p-3.5 sm:p-5 space-y-4">
+        <!-- ESC Normalization Card (Ratio R & Offset O) -->
+        <div class="rounded-xl border border-slate-800 bg-oceanCardInner p-3.5 space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <h2 class="text-sm font-bold text-white">ESC Normalization (R &amp; O)</h2>
+              <p class="text-[11px] text-slate-400 mt-0.5">
+                <span class="font-mono">ESC2 = clamp(1000 + round((ESC1 - 1000) × R) + O)</span>
+              </p>
+            </div>
+            <button id="applyRoBtn" type="button" class="min-h-[44px] shrink-0 rounded-xl bg-sky-500/20 border border-sky-400/45 px-3 text-xs font-semibold text-sky-200 hover:bg-sky-500/30 active:scale-[0.98]">
+              Apply R &amp; O
+            </button>
+          </div>
+
+          <!-- Live ESC1 vs ESC2 Pulse Comparison Box -->
+          <div class="grid grid-cols-2 gap-2 rounded-xl border border-slate-800/90 bg-oceanCard p-2.5 text-center">
+            <div>
+              <div class="text-[10px] uppercase text-slate-400">Preview ESC 1</div>
+              <div id="trimPreviewEsc1" class="num-tabular font-mono text-sm font-bold text-emeraldAccent">1000 µs</div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase text-slate-400">Preview ESC 2</div>
+              <div id="trimPreviewEsc2" class="num-tabular font-mono text-sm font-bold text-sky-300">1000 µs</div>
+            </div>
+          </div>
+
+          <!-- Ratio (R) with +/- steppers -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <label for="ratioInput" class="text-xs font-semibold text-slate-200">Ratio (<span class="font-mono text-cyanAccent">R</span>)</label>
+              <div class="flex items-center gap-1.5">
+                <button type="button" data-r-step="-0.05" class="r-step min-h-[44px] min-w-[44px] rounded-xl border border-slate-700 bg-oceanCard font-mono text-sm font-bold text-slate-200 active:scale-[0.97]">−</button>
+                <input id="ratioInput" type="number" step="0.001" min="0.1" max="10" value="1.000" class="num-tabular min-h-[44px] w-24 rounded-xl border border-slate-700 bg-oceanCard px-2 text-center font-mono text-sm font-semibold text-cyanAccent focus:border-sky-400 focus:outline-none" />
+                <button type="button" data-r-step="0.05" class="r-step min-h-[44px] min-w-[44px] rounded-xl border border-slate-700 bg-oceanCard font-mono text-sm font-bold text-slate-200 active:scale-[0.97]">+</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button type="button" data-r="1.000" class="r-preset min-h-[40px] rounded-lg border border-slate-700/80 bg-oceanCard font-mono text-xs text-slate-300">R1.000</button>
+              <button type="button" data-r="1.500" class="r-preset min-h-[40px] rounded-lg border border-slate-700/80 bg-oceanCard font-mono text-xs text-slate-300">R1.500</button>
+              <button type="button" data-r="2.222" class="r-preset min-h-[40px] rounded-lg border border-sky-400/40 bg-sky-500/15 font-mono text-xs text-sky-200">R2.222</button>
+            </div>
+          </div>
+
+          <!-- Signed Offset (O) with +/- steppers (negative allowed) -->
+          <div class="space-y-1.5 pt-1">
+            <div class="flex items-center justify-between gap-2">
+              <label for="offsetInput" class="text-xs font-semibold text-slate-200">Offset (<span class="font-mono text-sky-300">O</span> µs)</label>
+              <div class="flex items-center gap-1.5">
+                <button type="button" data-o-step="-5" class="o-step min-h-[44px] min-w-[44px] rounded-xl border border-slate-700 bg-oceanCard font-mono text-sm font-bold text-slate-200 active:scale-[0.97]">−</button>
+                <input id="offsetInput" type="number" step="1" min="-500" max="500" value="0" class="num-tabular min-h-[44px] w-24 rounded-xl border border-slate-700 bg-oceanCard px-2 text-center font-mono text-sm font-semibold text-sky-300 focus:border-sky-400 focus:outline-none" />
+                <button type="button" data-o-step="5" class="o-step min-h-[44px] min-w-[44px] rounded-xl border border-slate-700 bg-oceanCard font-mono text-sm font-bold text-slate-200 active:scale-[0.97]">+</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button type="button" data-o="-20" class="o-preset min-h-[40px] rounded-lg border border-slate-700/80 bg-oceanCard font-mono text-xs text-slate-300">O-20</button>
+              <button type="button" data-o="-5" class="o-preset min-h-[40px] rounded-lg border border-slate-700/80 bg-oceanCard font-mono text-xs text-slate-300">O-5</button>
+              <button type="button" data-o="0" class="o-preset min-h-[40px] rounded-lg border border-sky-400/40 bg-sky-500/15 font-mono text-xs text-sky-200">O0</button>
+              <button type="button" data-o="15" class="o-preset min-h-[40px] rounded-lg border border-slate-700/80 bg-oceanCard font-mono text-xs text-slate-300">O+15</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ramp Duration (D: 50 - 15000 ms) -->
+        <div class="rounded-xl border border-slate-800 bg-oceanCardInner p-3.5 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <label for="rampSlider" class="text-xs font-semibold text-slate-200">
+              Ramp Duration (<span class="font-mono text-cyanAccent">D</span>)
+            </label>
+            <span id="rampValLabel" class="num-tabular font-mono text-sm font-bold text-cyanAccent">2000 ms</span>
+          </div>
+          <input id="rampSlider" type="range" min="50" max="15000" step="50" value="2000" class="touch-slider" />
+          <div class="grid grid-cols-4 gap-1.5 pt-0.5">
+            <button type="button" data-d="100" class="d-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">100ms</button>
+            <button type="button" data-d="500" class="d-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">500ms</button>
+            <button type="button" data-d="1000" class="d-preset min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">1000ms</button>
+            <button type="button" data-d="2000" class="d-preset min-h-[44px] rounded-xl border border-sky-400/40 bg-sky-500/15 font-mono text-xs font-semibold text-sky-200 active:scale-[0.98]">2000ms</button>
+          </div>
+        </div>
+
+        <!-- Independent Motor 1 (M1) & Motor 2 (M2) Bench Sliders -->
+        <div class="space-y-3">
+          <!-- Motor 1 -->
+          <div class="rounded-xl border border-slate-800 bg-oceanCardInner p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-emeraldAccent">Motor 1 Override (M1)</span>
+              <span id="m1Readout" class="num-tabular font-mono text-xs font-semibold text-slate-200">0 (1000 µs)</span>
+            </div>
+            <input id="m1Slider" type="range" min="0" max="1000" step="1" value="0" class="touch-slider" />
+            <div class="grid grid-cols-4 gap-1.5">
+              <button type="button" data-m="1" data-delta="-25" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">-25</button>
+              <button type="button" data-m="1" data-delta="-5" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">-5</button>
+              <button type="button" data-m="1" data-delta="5" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">+5</button>
+              <button type="button" data-m="1" data-delta="25" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">+25</button>
+            </div>
+          </div>
+
+          <!-- Motor 2 -->
+          <div class="rounded-xl border border-slate-800 bg-oceanCardInner p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-sky-300">Motor 2 Override (M2)</span>
+              <span id="m2Readout" class="num-tabular font-mono text-xs font-semibold text-slate-200">0 (1000 µs)</span>
+            </div>
+            <input id="m2Slider" type="range" min="0" max="1000" step="1" value="0" class="touch-slider" />
+            <div class="grid grid-cols-4 gap-1.5">
+              <button type="button" data-m="2" data-delta="-25" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">-25</button>
+              <button type="button" data-m="2" data-delta="-5" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">-5</button>
+              <button type="button" data-m="2" data-delta="5" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">+5</button>
+              <button type="button" data-m="2" data-delta="25" class="m-step min-h-[44px] rounded-xl border border-slate-700/85 bg-oceanCard font-mono text-xs text-slate-200 active:scale-[0.98]">+25</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- TAB 3: LOG (Live Command Telemetry Terminal)                    -->
+      <!-- =============================================================== -->
+      <section id="panel-log" class="tab-panel tab-panel-log hidden ocean-card rounded-2xl p-3.5 sm:p-5 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-sm font-bold text-white">BLE Command Telemetry Log</h2>
+            <p class="text-[11px] text-slate-400">Outgoing commands &amp; link diagnostics</p>
+          </div>
+          <button id="clearLogBtn" type="button" class="min-h-[44px] rounded-xl border border-slate-700 bg-oceanCardInner px-3.5 text-xs font-semibold text-slate-300 hover:text-white active:scale-[0.98]">
+            Clear
+          </button>
+        </div>
+
+        <form id="manualCmdForm" class="flex gap-2">
+          <input id="manualCmdInput" type="text" placeholder="Raw command (e.g. T200, R2.222, O-15, OFF)" class="min-h-[44px] flex-1 min-w-0 rounded-xl border border-slate-700 bg-oceanCardInner px-3 font-mono text-xs text-white placeholder-slate-500 focus:border-sky-400 focus:outline-none" />
+          <button type="submit" class="min-h-[44px] shrink-0 rounded-xl border border-sky-400/40 bg-sky-500/20 px-4 text-xs font-semibold text-sky-200 hover:bg-sky-500/30 active:scale-[0.98]">
+            Send
+          </button>
+        </form>
+
+        <div id="eventLog" class="log-scroll h-60 overflow-y-auto rounded-xl border border-slate-800 bg-oceanCardInner p-3 font-mono text-xs space-y-1.5">
+          <div class="text-slate-400">[SYS] Ready. Tap Connect for Jellyfish_BLE or Demo to test offline.</div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      // =====================================================================
+      // 1. BLE UART UUIDS & ESC PULSE CONSTANTS
+      // =====================================================================
+      const DEVICE_NAME = 'Jellyfish_BLE';
+      const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+      const CHARACTERISTIC_UUID_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+      const CHARACTERISTIC_UUID_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+      const OFF_ESC_US = 1000;
+      const MIN_SPIN_ESC_US = 1036;
+      const MAX_ESC_US = 1450;
+      const DRAG_THROTTLE_MS = 65; // ~50-80ms rate-limit during continuous drags
+
+      // =====================================================================
+      // 2. APPLICATION STATE
+      // =====================================================================
+      const state = {
+        bleDevice: null,
+        rxCharacteristic: null,
+        txCharacteristic: null,
+        isConnected: false,
+        simMode: false,
+        springReturn: true,
+        activeTab: 'pilot',
+        throttle: 0,
+        m1: 0,
+        m2: 0,
+        ratio: 1.0,
+        offset: 0,
+        rampMs: 2000,
+        servoAngle: 90,
+        logCount: 0,
+        timers: {},
+        lastSent: {},
+        pending: {}
+      };
+
+      // =====================================================================
+      // 3. DOM REFERENCES
+      // =====================================================================
+      const $ = (id) => document.getElementById(id);
+      const el = {
+        statusBadge: $('statusBadge'),
+        statusDot: $('statusDot'),
+        statusText: $('statusText'),
+        bleConnectBtn: $('bleConnectBtn'),
+        bleConnectLabel: $('bleConnectLabel'),
+        simToggleBtn: $('simToggleBtn'),
+        emergencyOffBtn: $('emergencyOffBtn'),
+        tabLogCount: $('tabLogCount'),
+
+        pillThrottle: $('pillThrottle'),
+        pillServo: $('pillServo'),
+        pillEsc1: $('pillEsc1'),
+        pillEsc2: $('pillEsc2'),
+
+        springReturnToggle: $('springReturnToggle'),
+        springKnob: $('springKnob'),
+        joystickPad: $('joystickPad'),
+        joystickKnob: $('joystickKnob'),
+        zeroJoystickBtn: $('zeroJoystickBtn'),
+
+        masterThrottleSlider: $('masterThrottleSlider'),
+        masterThrottleLabel: $('masterThrottleLabel'),
+
+        servoArcPath: $('servoArcPath'),
+        servoNeedleGroup: $('servoNeedleGroup'),
+        servoAngleLabel: $('servoAngleLabel'),
+        servoSlider: $('servoSlider'),
+        centerServoBtn: $('centerServoBtn'),
+
+        trimPreviewEsc1: $('trimPreviewEsc1'),
+        trimPreviewEsc2: $('trimPreviewEsc2'),
+        ratioInput: $('ratioInput'),
+        offsetInput: $('offsetInput'),
+        applyRoBtn: $('applyRoBtn'),
+
+        rampSlider: $('rampSlider'),
+        rampValLabel: $('rampValLabel'),
+
+        m1Slider: $('m1Slider'),
+        m1Readout: $('m1Readout'),
+        m2Slider: $('m2Slider'),
+        m2Readout: $('m2Readout'),
+
+        eventLog: $('eventLog'),
+        clearLogBtn: $('clearLogBtn'),
+        manualCmdForm: $('manualCmdForm'),
+        manualCmdInput: $('manualCmdInput'),
+
+        toastBanner: $('toastBanner'),
+        toastIcon: $('toastIcon'),
+        toastMessage: $('toastMessage'),
+        toastClose: $('toastClose')
+      };
+
+      // =====================================================================
+      // 4. TOAST & LOG HELPERS
+      // =====================================================================
+      let toastTimer = null;
+      function showToast(msg, tone = 'info') {
+        el.toastMessage.textContent = msg;
+        el.toastIcon.textContent = tone === 'error' ? '⚠' : tone === 'success' ? '✓' : '●';
+        el.toastIcon.className = 'shrink-0 ' + (
+          tone === 'error' ? 'text-red-400' : tone === 'success' ? 'text-emeraldAccent' : 'text-sky-400'
+        );
+        el.toastBanner.classList.remove('hidden');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.toastBanner.classList.add('hidden'), 3000);
+      }
+      el.toastClose.addEventListener('click', () => el.toastBanner.classList.add('hidden'));
+
+      function appendLog(tag, text, tone = 'tx') {
+        const now = new Date();
+        const ts = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+        const row = document.createElement('div');
+        row.className = 'flex items-baseline gap-2 leading-snug break-all';
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'text-slate-500 shrink-0 text-[11px]';
+        timeEl.textContent = ts;
+
+        const tagEl = document.createElement('span');
+        tagEl.className = 'shrink-0 font-bold ' + (
+          tone === 'tx' ? 'text-cyanAccent' :
+          tone === 'rx' ? 'text-emeraldAccent' :
+          tone === 'warn' ? 'text-amber-300' : 'text-red-400'
+        );
+        tagEl.textContent = `[${tag}]`;
+
+        const msgEl = document.createElement('span');
+        msgEl.className = 'text-slate-200';
+        msgEl.textContent = text;
+
+        row.append(timeEl, tagEl, msgEl);
+        el.eventLog.appendChild(row);
+        el.eventLog.scrollTop = el.eventLog.scrollHeight;
+
+        state.logCount += 1;
+        el.tabLogCount.textContent = String(state.logCount);
+      }
+
+      // =====================================================================
+      // 5. ESC PULSE CALCULATIONS & UI SYNC
+      // =====================================================================
+      function userThrottleToUs(val) {
+        const v = Math.max(0, Math.min(1000, Math.round(val)));
+        if (v === 0) return OFF_ESC_US;
+        return Math.round(MIN_SPIN_ESC_US + ((v - 1) / 999) * (MAX_ESC_US - MIN_SPIN_ESC_US));
+      }
+
+      function computeEsc2Pulse(pulse1) {
+        if (pulse1 <= OFF_ESC_US) return OFF_ESC_US;
+        const raw = OFF_ESC_US + Math.round((pulse1 - OFF_ESC_US) * state.ratio) + state.offset;
+        return Math.max(OFF_ESC_US, Math.min(MAX_ESC_US, raw));
+      }
+
+      function updateAllReadouts() {
+        const p1 = userThrottleToUs(state.m1);
+        const p2 = state.m2 > 0 ? userThrottleToUs(state.m2) : computeEsc2Pulse(p1);
+
+        el.pillThrottle.textContent = String(state.throttle);
+        el.pillServo.textContent = `${state.servoAngle}°`;
+        el.pillEsc1.textContent = `${p1} µs`;
+        el.pillEsc2.textContent = `${p2} µs`;
+
+        el.masterThrottleSlider.value = String(state.throttle);
+        el.masterThrottleLabel.textContent = `${state.throttle} / 1000`;
+
+        el.trimPreviewEsc1.textContent = `${p1} µs`;
+        el.trimPreviewEsc2.textContent = `${p2} µs`;
+
+        el.m1Slider.value = String(state.m1);
+        el.m1Readout.textContent = `${state.m1} (${userThrottleToUs(state.m1)} µs)`;
+
+        el.m2Slider.value = String(state.m2);
+        el.m2Readout.textContent = `${state.m2} (${userThrottleToUs(state.m2)} µs)`;
+
+        updateServoVisuals(state.servoAngle);
+      }
+
+      function updateServoVisuals(angle) {
+        const a = Math.max(0, Math.min(180, Math.round(angle)));
+        el.servoSlider.value = String(a);
+        el.servoAngleLabel.textContent = `${a}°`;
+        el.servoNeedleGroup.setAttribute('transform', `translate(42, 40) rotate(${a - 90})`);
+
+        const rad = ((180 - a) * Math.PI) / 180;
+        const x = (42 + 34 * Math.cos(rad)).toFixed(2);
+        const y = (40 - 34 * Math.sin(rad)).toFixed(2);
+        el.servoArcPath.setAttribute('d', `M 8 40 A 34 34 0 0 1 ${x} ${y}`);
+      }
+
+      // =====================================================================
+      // 6. BLE CONNECTION & RATE-LIMITED COMMAND SENDER
+      // =====================================================================
+      function updateStatusUI() {
+        if (state.isConnected) {
+          el.statusBadge.className = 'inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300';
+          el.statusDot.className = 'h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse';
+          el.statusText.textContent = 'Connected';
+          el.bleConnectLabel.textContent = 'Disconnect';
+        } else if (state.simMode) {
+          el.statusBadge.className = 'inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-400/40 bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-300';
+          el.statusDot.className = 'h-1.5 w-1.5 rounded-full bg-sky-400';
+          el.statusText.textContent = 'Demo';
+          el.bleConnectLabel.textContent = 'Connect';
+        } else {
+          el.statusBadge.className = 'inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/35 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-300';
+          el.statusDot.className = 'h-1.5 w-1.5 rounded-full bg-amber-400';
+          el.statusText.textContent = 'Offline';
+          el.bleConnectLabel.textContent = 'Connect';
+        }
+
+        el.simToggleBtn.setAttribute('aria-pressed', String(state.simMode));
+        el.simToggleBtn.className = state.simMode
+          ? 'min-h-[40px] rounded-lg bg-cyanAccent/20 px-2.5 text-xs font-semibold text-cyanAccent transition'
+          : 'min-h-[40px] rounded-lg px-2.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition';
+      }
+
+      async function sendCommand(cmd, quiet = false) {
+        const clean = String(cmd).trim();
+        if (!clean) return;
+
+        if (state.isConnected && state.rxCharacteristic) {
+          try {
+            const payload = new TextEncoder().encode(clean);
+            if (state.rxCharacteristic.writeValueWithoutResponse) {
+              await state.rxCharacteristic.writeValueWithoutResponse(payload);
+            } else {
+              await state.rxCharacteristic.writeValue(payload);
+            }
+            appendLog('BLE TX', clean, 'tx');
+          } catch (err) {
+            appendLog('ERR', `${clean}: ${err.message || err}`, 'err');
+            if (!quiet) showToast('BLE write error', 'error');
+          }
+        } else if (state.simMode) {
+          appendLog('SIM TX', clean, 'tx');
+        } else {
+          appendLog('OFFLINE', `Skipped "${clean}" (tap Connect or Demo)`, 'warn');
+          if (!quiet) showToast('Tap Connect or Demo to send commands', 'info');
+        }
+      }
+
+      function sendThrottled(channel, cmd) {
+        const now = performance.now();
+        const last = state.lastSent[channel] || 0;
+        const elapsed = now - last;
+
+        if (elapsed >= DRAG_THROTTLE_MS) {
+          state.lastSent[channel] = now;
+          state.pending[channel] = null;
+          sendCommand(cmd, true);
+        } else {
+          state.pending[channel] = cmd;
+          if (!state.timers[channel]) {
+            state.timers[channel] = setTimeout(() => {
+              state.timers[channel] = null;
+              const next = state.pending[channel];
+              if (next) {
+                state.pending[channel] = null;
+                state.lastSent[channel] = performance.now();
+                sendCommand(next, true);
+              }
+            }, Math.max(10, DRAG_THROTTLE_MS - elapsed));
+          }
+        }
+      }
+
+      function flushThrottled(channel, fallbackCmd) {
+        if (state.timers[channel]) {
+          clearTimeout(state.timers[channel]);
+          state.timers[channel] = null;
+        }
+        const cmd = state.pending[channel] || fallbackCmd;
+        state.pending[channel] = null;
+        if (cmd) {
+          state.lastSent[channel] = performance.now();
+          sendCommand(cmd, true);
+        }
+      }
+
+      async function handleConnectToggle() {
+        if (state.isConnected && state.bleDevice) {
+          try {
+            if (state.bleDevice.gatt && state.bleDevice.gatt.connected) {
+              state.bleDevice.gatt.disconnect();
+            }
+          } catch (_) {}
+          state.isConnected = false;
+          state.rxCharacteristic = null;
+          updateStatusUI();
+          appendLog('BLE', 'Disconnected from Jellyfish_BLE', 'warn');
+          return;
+        }
+
+        if (!navigator.bluetooth || !navigator.bluetooth.requestDevice) {
+          state.simMode = true;
+          updateStatusUI();
+          appendLog('DEMO', 'Web Bluetooth unavailable here; switched to Demo mode', 'warn');
+          showToast('Web Bluetooth unavailable — Demo mode enabled', 'info');
+          return;
+        }
+
+        try {
+          appendLog('BLE', `Scanning for ${DEVICE_NAME}...`, 'tx');
+          const device = await navigator.bluetooth.requestDevice({
+            filters: [{ name: DEVICE_NAME }],
+            optionalServices: [SERVICE_UUID]
+          });
+          state.bleDevice = device;
+
+          device.addEventListener('gattserverdisconnected', () => {
+            state.isConnected = false;
+            state.rxCharacteristic = null;
+            updateStatusUI();
+            appendLog('BLE', 'Link lost / disconnected', 'warn');
+            showToast('Jellyfish_BLE disconnected', 'info');
+          });
+
+          const server = await device.gatt.connect();
+          const service = await server.getPrimaryService(SERVICE_UUID);
+          state.rxCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_RX);
+
+          try {
+            state.txCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_TX);
+            await state.txCharacteristic.startNotifications();
+            state.txCharacteristic.addEventListener('characteristicvaluechanged', (ev) => {
+              const msg = new TextDecoder().decode(ev.target.value).trim();
+              if (msg) appendLog('BLE RX', msg, 'rx');
+            });
+          } catch (_) {
+            // TX notifications optional
+          }
+
+          state.isConnected = true;
+          updateStatusUI();
+          appendLog('BLE', `Connected to ${device.name || DEVICE_NAME}`, 'rx');
+          showToast(`Connected to ${device.name || DEVICE_NAME}`, 'success');
+        } catch (err) {
+          appendLog('ERR', err.message || 'Connection cancelled', 'err');
+          showToast(err.message || 'BLE connection failed', 'error');
+        }
+      }
+
+      // =====================================================================
+      // 7. TAB NAVIGATION & EMERGENCY STOP
+      // =====================================================================
+      function switchTab(tabName) {
+        state.activeTab = tabName;
+        document.querySelectorAll('.tab-btn').forEach((btn) => {
+          const active = btn.getAttribute('data-tab') === tabName;
+          btn.className = active
+            ? 'tab-btn min-h-[44px] rounded-lg bg-sky-500/20 border border-sky-400/40 text-xs font-semibold text-sky-200 transition'
+            : 'tab-btn min-h-[44px] rounded-lg border border-transparent text-xs font-medium text-slate-400 hover:text-slate-200 transition';
+        });
+
+        $('panel-pilot').classList.toggle('hidden', tabName !== 'pilot');
+        $('panel-trim').classList.toggle('hidden', tabName !== 'trim');
+        $('panel-log').classList.toggle('hidden', tabName !== 'log');
+      }
+
+      document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
+      });
+
+      function triggerEmergencyOff() {
+        Object.keys(state.timers).forEach((k) => {
+          clearTimeout(state.timers[k]);
+          state.timers[k] = null;
+          state.pending[k] = null;
+        });
+        state.throttle = 0;
+        state.m1 = 0;
+        state.m2 = 0;
+        placeJoystickNormalized(0, -1); // Bottom center (T=0, A=90)
+        updateAllReadouts();
+        sendCommand('OFF');
+        showToast('STOP / OFF sent (1000 µs)', 'success');
+      }
+
+      el.emergencyOffBtn.addEventListener('click', triggerEmergencyOff);
+      el.bleConnectBtn.addEventListener('click', handleConnectToggle);
+      el.simToggleBtn.addEventListener('click', () => {
+        state.simMode = !state.simMode;
+        updateStatusUI();
+        appendLog('MODE', state.simMode ? 'Demo mode enabled' : 'Demo mode disabled', 'tx');
+      });
+
+      // =====================================================================
+      // 8. 2D VIRTUAL JOYSTICK (Y = T 0..1000, X = A 0..180)
+      // =====================================================================
+      let draggingJoystick = false;
+
+      function placeJoystickNormalized(normX, normY) {
+        // normX in [-1, 1] (0 = center), normY in [-1, 1] (-1 = bottom/T0, +1 = top/T1000)
+        const rect = el.joystickPad.getBoundingClientRect();
+        const maxR = (rect.width || 220) * 0.34;
+        const dx = normX * maxR;
+        const dy = -normY * maxR;
+        el.joystickKnob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+      }
+
+      function updateFromJoystickPointer(clientX, clientY, isRelease = false) {
+        const rect = el.joystickPad.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const maxR = rect.width * 0.34;
+
+        let dx = clientX - cx;
+        let dy = clientY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > maxR && dist > 0) {
+          dx = (dx / dist) * maxR;
+          dy = (dy / dist) * maxR;
+        }
+
+        const normX = maxR > 0 ? dx / maxR : 0;   // -1 .. +1 -> A 0 .. 180
+        const normY = maxR > 0 ? -dy / maxR : -1; // -1 .. +1 -> T 0 .. 1000
+
+        const newThrottle = Math.max(0, Math.min(1000, Math.round(((normY + 1) / 2) * 1000)));
+        const newAngle = Math.max(0, Math.min(180, Math.round(((normX + 1) / 2) * 180)));
+
+        state.throttle = newThrottle;
+        state.m1 = newThrottle;
+        state.m2 = 0;
+        state.servoAngle = newAngle;
+
+        el.joystickKnob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+        updateAllReadouts();
+
+        if (isRelease) {
+          flushThrottled('T', `T${newThrottle}`);
+          flushThrottled('A', `A${newAngle}`);
+        } else {
+          sendThrottled('T', `T${newThrottle}`);
+          sendThrottled('A', `A${newAngle}`);
+        }
+      }
+
+      el.joystickPad.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        draggingJoystick = true;
+        el.joystickPad.setPointerCapture(e.pointerId);
+        el.joystickKnob.classList.add('active');
+        updateFromJoystickPointer(e.clientX, e.clientY, false);
+      });
+
+      el.joystickPad.addEventListener('pointermove', (e) => {
+        if (!draggingJoystick) return;
+        updateFromJoystickPointer(e.clientX, e.clientY, false);
+      });
+
+      function finishJoystickGesture(e) {
+        if (!draggingJoystick) return;
+        draggingJoystick = false;
+        el.joystickKnob.classList.remove('active');
+
+        if (state.springReturn) {
+          state.throttle = 0;
+          state.m1 = 0;
+          state.m2 = 0;
+          state.servoAngle = 90;
+          placeJoystickNormalized(0, -1);
+          updateAllReadouts();
+          flushThrottled('T', 'T0');
+          flushThrottled('A', 'A90');
+        } else {
+          updateFromJoystickPointer(e.clientX, e.clientY, true);
+        }
+      }
+
+      el.joystickPad.addEventListener('pointerup', finishJoystickGesture);
+      el.joystickPad.addEventListener('pointercancel', finishJoystickGesture);
+
+      el.springReturnToggle.addEventListener('change', () => {
+        state.springReturn = el.springReturnToggle.checked;
+        el.springKnob.style.transform = state.springReturn ? 'translateX(16px)' : 'translateX(0px)';
+      });
+
+      el.zeroJoystickBtn.addEventListener('click', () => {
+        state.throttle = 0;
+        state.m1 = 0;
+        state.m2 = 0;
+        state.servoAngle = 90;
+        placeJoystickNormalized(0, -1);
+        updateAllReadouts();
+        sendCommand('T0', true);
+        sendCommand('A90', true);
+      });
+
+      // =====================================================================
+      // 9. MASTER THROTTLE & SERVO SLIDERS + PRESETS
+      // =====================================================================
+      el.masterThrottleSlider.addEventListener('input', () => {
+        const val = Math.max(0, Math.min(1000, parseInt(el.masterThrottleSlider.value, 10) || 0));
+        state.throttle = val;
+        state.m1 = val;
+        state.m2 = 0;
+        placeJoystickNormalized((state.servoAngle / 90) - 1, (val / 500) - 1);
+        updateAllReadouts();
+        sendThrottled('T', `T${val}`);
+      });
+
+      el.masterThrottleSlider.addEventListener('change', () => {
+        flushThrottled('T', `T${state.throttle}`);
+      });
+
+      document.querySelectorAll('.t-preset').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const val = parseInt(btn.getAttribute('data-t'), 10);
+          state.throttle = val;
+          state.m1 = val;
+          state.m2 = 0;
+          placeJoystickNormalized((state.servoAngle / 90) - 1, (val / 500) - 1);
+          updateAllReadouts();
+          sendCommand(`T${val}`);
+        });
+      });
+
+      el.servoSlider.addEventListener('input', () => {
+        const val = Math.max(0, Math.min(180, parseInt(el.servoSlider.value, 10) || 0));
+        state.servoAngle = val;
+        placeJoystickNormalized((val / 90) - 1, (state.throttle / 500) - 1);
+        updateAllReadouts();
+        sendThrottled('A', `A${val}`);
+      });
+
+      el.servoSlider.addEventListener('change', () => {
+        flushThrottled('A', `A${state.servoAngle}`);
+      });
+
+      el.centerServoBtn.addEventListener('click', () => {
+        state.servoAngle = 90;
+        placeJoystickNormalized(0, (state.throttle / 500) - 1);
+        updateAllReadouts();
+        sendCommand('A90');
+      });
+
+      document.querySelectorAll('.a-preset').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const val = parseInt(btn.getAttribute('data-a'), 10);
+          state.servoAngle = val;
+          placeJoystickNormalized((val / 90) - 1, (state.throttle / 500) - 1);
+          updateAllReadouts();
+          sendCommand(`A${val}`);
+        });
+      });
+
+      // =====================================================================
+      // 10. RATIO (R), OFFSET (O), RAMP (D), AND M1/M2 OVERRIDES
+      // =====================================================================
+      function setRatio(val, send = false) {
+        const clamped = Math.max(0.1, Math.min(10, Number(val) || 1.0));
+        state.ratio = Number(clamped.toFixed(3));
+        el.ratioInput.value = state.ratio.toFixed(3);
+        updateAllReadouts();
+        if (send) sendCommand(`R${state.ratio}`);
+      }
+
+      function setOffset(val, send = false) {
+        const clamped = Math.max(-500, Math.min(500, Math.round(Number(val) || 0)));
+        state.offset = clamped;
+        el.offsetInput.value = String(clamped);
+        updateAllReadouts();
+        if (send) sendCommand(`O${clamped}`);
+      }
+
+      el.ratioInput.addEventListener('change', () => setRatio(el.ratioInput.value, true));
+      el.offsetInput.addEventListener('change', () => setOffset(el.offsetInput.value, true));
+
+      document.querySelectorAll('.r-step').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const step = parseFloat(btn.getAttribute('data-r-step'));
+          setRatio(state.ratio + step, true);
+        });
+      });
+
+      document.querySelectorAll('.o-step').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const step = parseInt(btn.getAttribute('data-o-step'), 10);
+          setOffset(state.offset + step, true);
+        });
+      });
+
+      document.querySelectorAll('.r-preset').forEach((btn) => {
+        btn.addEventListener('click', () => setRatio(btn.getAttribute('data-r'), true));
+      });
+
+      document.querySelectorAll('.o-preset').forEach((btn) => {
+        btn.addEventListener('click', () => setOffset(btn.getAttribute('data-o'), true));
+      });
+
+      el.applyRoBtn.addEventListener('click', async () => {
+        setRatio(el.ratioInput.value, false);
+        setOffset(el.offsetInput.value, false);
+        await sendCommand(`R${state.ratio}`);
+        await sendCommand(`O${state.offset}`);
+        showToast(`Applied R${state.ratio} & O${state.offset}`, 'success');
+      });
+
+      // Ramp Duration D<50..15000>
+      function setRamp(val, send = true) {
+        const clamped = Math.max(50, Math.min(15000, Math.round(Number(val) || 2000)));
+        state.rampMs = clamped;
+        el.rampSlider.value = String(clamped);
+        el.rampValLabel.textContent = `${clamped} ms`;
+        if (send) sendCommand(`D${clamped}`);
+      }
+
+      el.rampSlider.addEventListener('input', () => setRamp(el.rampSlider.value, false));
+      el.rampSlider.addEventListener('change', () => setRamp(el.rampSlider.value, true));
+      document.querySelectorAll('.d-preset').forEach((btn) => {
+        btn.addEventListener('click', () => setRamp(btn.getAttribute('data-d'), true));
+      });
+
+      // Independent M1 & M2
+      el.m1Slider.addEventListener('input', () => {
+        state.m1 = Math.max(0, Math.min(1000, parseInt(el.m1Slider.value, 10) || 0));
+        updateAllReadouts();
+        sendThrottled('M1', `M1${state.m1}`);
+      });
+      el.m1Slider.addEventListener('change', () => flushThrottled('M1', `M1${state.m1}`));
+
+      el.m2Slider.addEventListener('input', () => {
+        state.m2 = Math.max(0, Math.min(1000, parseInt(el.m2Slider.value, 10) || 0));
+        updateAllReadouts();
+        sendThrottled('M2', `M2${state.m2}`);
+      });
+      el.m2Slider.addEventListener('change', () => flushThrottled('M2', `M2${state.m2}`));
+
+      document.querySelectorAll('.m-step').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const m = btn.getAttribute('data-m');
+          const delta = parseInt(btn.getAttribute('data-delta'), 10);
+          if (m === '1') {
+            state.m1 = Math.max(0, Math.min(1000, state.m1 + delta));
+            updateAllReadouts();
+            sendCommand(`M1${state.m1}`);
+          } else {
+            state.m2 = Math.max(0, Math.min(1000, state.m2 + delta));
+            updateAllReadouts();
+            sendCommand(`M2${state.m2}`);
+          }
+        });
+      });
+
+      // =====================================================================
+      // 11. LOG CLEAR & MANUAL COMMAND FORM
+      // =====================================================================
+      el.clearLogBtn.addEventListener('click', () => {
+        el.eventLog.innerHTML = '';
+        state.logCount = 0;
+        el.tabLogCount.textContent = '0';
+        appendLog('SYS', 'Log cleared', 'tx');
+      });
+
+      el.manualCmdForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const cmd = el.manualCmdInput.value.trim();
+        if (!cmd) return;
+        sendCommand(cmd);
+        el.manualCmdInput.value = '';
+      });
+
+      // Initialize layout on load & resize
+      window.addEventListener('resize', () => {
+        placeJoystickNormalized((state.servoAngle / 90) - 1, (state.throttle / 500) - 1);
+      });
+
+      updateStatusUI();
+      updateAllReadouts();
+      requestAnimationFrame(() => placeJoystickNormalized(0, -1));
+    })();
+  </script>
+</body>
+</html>
